@@ -12,19 +12,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 1. Secret scanning
       - name: Gitleaks - scan for secrets
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. SAST
       - name: Semgrep - static analysis
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: p/ci
+        run: docker run --rm -v "${{ github.workspace }}:/src" semgrep/semgrep semgrep scan --config p/ci --config p/python --error
 
-      # 3. Dependency / CVE scanning (source)
       - name: Trivy - filesystem scan
         uses: aquasecurity/trivy-action@master
         with:
@@ -33,17 +28,14 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: 1
 
-      # 4. Dockerfile lint (catches missing USER, i.e. running as root)
       - name: Hadolint - Dockerfile lint
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
 
-      # 5. Build image
       - name: Build image
         run: docker build -t demo-app:${{ github.sha }} .
 
-      # 6. Container image CVE scan
       - name: Trivy - image scan
         uses: aquasecurity/trivy-action@master
         with:
@@ -52,12 +44,12 @@ jobs:
           exit-code: 0
           ignore-unfixed: true
 
-      # 7. Slack alert on any failure above
       - name: Slack alert
         if: failure()
         uses: slackapi/slack-github-action@v1.27.0
         with:
           payload: |
-            {"text": "🚨 DevSecOps pipeline FAILED on ${{ github.repository }} — commit ${{ github.sha }} by ${{ github.actor }}"}
+            {"text": "DevSecOps pipeline FAILED on ${{ github.repository }} - commit ${{ github.sha }} by ${{ github.actor }}"}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

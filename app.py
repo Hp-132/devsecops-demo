@@ -29,7 +29,7 @@ def home():
 def get_user():
     name = request.args.get("name", "")
     conn = get_db()
-    query = "SELECT id, username, role FROM users WHERE username = '" + name + "'"  # nosec - intentional for demo
+    query = "SELECT id, username, role FROM users WHERE username = '" + name + 
     cursor = conn.execute(query)
     rows = cursor.fetchall()
     return {"results": rows}
