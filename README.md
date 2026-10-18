@@ -1,30 +1,22 @@
-# DevSecOps CI/CD Pipeline 
-
+# DevSecOps CI/CD Pipeline
 
 Forked from [DrVCprog/devsecops-demo](https://github.com/DrVCprog/devsecops-demo).
 
 A security pipeline built around an intentionally vulnerable Flask app. Issues are caught at **commit time** by GitHub Actions and at **deploy time** by Kubernetes.
 
+## Architecture
+
 ```
-git push → GitHub Actions: Gitleaks → Semgrep → Trivy → Hadolint → Docker build → Trivy image
-              │ any failure → Slack alert
-              ▼
-         Git (k8s/) → Argo CD → Kind cluster ← Kyverno blocks root containers
-
-
-
-
-
  git push
     │
     ▼
  GitHub Actions  ──────────────────────────────────────────────┐
-  1. Gitleaks   → hardcoded secrets in code / git history      │ any step fails
-  2. Semgrep    → insecure code patterns (SAST)                │ ─────────────►  Slack alert
-  3. Trivy fs   → known CVEs in requirements.txt               │
-  4. Hadolint   → Dockerfile best practices                    │
+  1. Gitleaks    → hardcoded secrets in code / git history     │ any step fails
+  2. Semgrep     → insecure code patterns (SAST)               │ ─────────────►  Slack alert
+  3. Trivy fs    → known CVEs in requirements.txt              │
+  4. Hadolint    → Dockerfile best practices                   │
   5. docker build                                              │
-  6. Trivy image→ CVEs in the built image (report only)        │
+  6. Trivy image → CVEs in the built image (report only)       │
     │                                                          ┘
     ▼
  Git repo (k8s/ folder = desired state)
@@ -33,28 +25,34 @@ git push → GitHub Actions: Gitleaks → Semgrep → Trivy → Hadolint → Doc
  Argo CD  ──sync──►  Kind cluster  ◄── Kyverno admission webhook
                                         (rejects pods without runAsNonRoot)
 ```
-Tools
-Tool	Layer	Role in this project
-GitHub Actions	CI	Runs the security pipeline on every push
-Gitleaks	Secrets	Detects credentials (AWS key pattern) in code and git history
-Semgrep	SAST	Flags SQL injection and unsafe Flask host binding
-Trivy	SCA / image	Finds HIGH/CRITICAL CVEs in Python dependencies and the image
-Hadolint	Container	Lints the Dockerfile (e.g. DL3002: last USER is root)
-Docker	Build	Packages the app as a container image
-Slack webhook	Alerting	Posts a message when any pipeline step fails
-Kind	Runtime	Local Kubernetes cluster running inside Docker
-Argo CD	GitOps	Syncs k8s/ from this repo into the cluster
-Kyverno	Policy	Blocks workloads that do not set runAsNonRoot: true
-Results
-1. Pipeline: fail → fix → pass
-Run	Commit	Result	What was caught / fixed
-#1	Vulnerable version	❌	Gitleaks found a hardcoded AWS access key in config.py
-#2–#7	Fixes pushed one at a time	❌	Key still present in git history; vulnerable dependency versions (Trivy)
-#8–#9	Patch deps, scope Semgrep	❌	Semgrep avoid_app_run_with_bad_host: Flask bound to 0.0.0.0
-#10	Bind host via env var	✅	All checks passed
+
+## Tools
+
+| Tool | Layer | Role in this project |
+|---|---|---|
+| GitHub Actions | CI | Runs the security pipeline on every push |
+| Gitleaks | Secrets | Detects credentials (AWS key pattern) in code and git history |
+| Semgrep | SAST | Flags SQL injection and unsafe Flask host binding |
+| Trivy | SCA / image | Finds HIGH/CRITICAL CVEs in Python dependencies and the image |
+| Hadolint | Container | Lints the Dockerfile (e.g. DL3002: last USER is root) |
+| Docker | Build | Packages the app as a container image |
+| Slack webhook | Alerting | Posts a message when any pipeline step fails |
+| Kind | Runtime | Local Kubernetes cluster running inside Docker |
+| Argo CD | GitOps | Syncs `k8s/` from this repo into the cluster |
+| Kyverno | Policy | Blocks workloads that do not set `runAsNonRoot: true` |
 
 ## Results
-**Pipeline:** runs #1–#9 failed as the scanners caught issues. Run **#10 passed ✅** after all fixes.
+
+### 1. Pipeline: fail → fix → pass
+
+| Run | Commit | Result | What was caught / fixed |
+|---|---|---|---|
+| #1 | Vulnerable version | ❌ | Gitleaks found a hardcoded AWS access key in `config.py` |
+| #2–#7 | Fixes pushed one at a time | ❌ | Key still present in git history; vulnerable dependency versions (Trivy) |
+| #8–#9 | Patch deps, scope Semgrep | ❌ | Semgrep `avoid_app_run_with_bad_host`: Flask bound to `0.0.0.0` |
+| #10 | Bind host via env var | ✅ | All checks passed |
+
+### 2. Fixes applied
 
 | Caught by | Issue | Fix |
 |---|---|---|
@@ -64,9 +62,10 @@ Run	Commit	Result	What was caught / fixed
 | Trivy | Vulnerable Flask/Werkzeug/Jinja2 | Upgraded to patched versions |
 | Hadolint | Container runs as root | Non-root `appuser` |
 
-**Argo CD:** changing `replicas: 2 → 3` in Git auto-synced the cluster to 3 pods.
+### 3. GitOps with Argo CD
+Changing `replicas: 2 → 3` in Git auto-synced the cluster to 3 pods (app status: **Synced / Healthy**).
 
-**Kyverno:**
+### 4. Policy enforcement with Kyverno
 ```
 $ kubectl apply -f k8s/deployment.yaml
 Error: admission webhook "validate.kyverno.svc-fail" denied the request:
