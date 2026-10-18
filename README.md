@@ -10,18 +10,48 @@ git push → GitHub Actions: Gitleaks → Semgrep → Trivy → Hadolint → Doc
               │ any failure → Slack alert
               ▼
          Git (k8s/) → Argo CD → Kind cluster ← Kyverno blocks root containers
-```
 
-## Tools
-| Tool | Purpose |
-|---|---|
-| **Gitleaks** | Secrets in code and git history |
-| **Semgrep** | Static code analysis (SAST) |
-| **Trivy** | CVEs in dependencies and the container image |
-| **Hadolint** | Dockerfile linting |
-| **Slack** | Alert on pipeline failure |
-| **Argo CD** | GitOps sync from `k8s/` to the cluster |
-| **Kyverno** | Admission policy requiring `runAsNonRoot` |
+
+
+
+
+ git push
+    │
+    ▼
+ GitHub Actions  ──────────────────────────────────────────────┐
+  1. Gitleaks   → hardcoded secrets in code / git history      │ any step fails
+  2. Semgrep    → insecure code patterns (SAST)                │ ─────────────►  Slack alert
+  3. Trivy fs   → known CVEs in requirements.txt               │
+  4. Hadolint   → Dockerfile best practices                    │
+  5. docker build                                              │
+  6. Trivy image→ CVEs in the built image (report only)        │
+    │                                                          ┘
+    ▼
+ Git repo (k8s/ folder = desired state)
+    │  watched by
+    ▼
+ Argo CD  ──sync──►  Kind cluster  ◄── Kyverno admission webhook
+                                        (rejects pods without runAsNonRoot)
+```
+Tools
+Tool	Layer	Role in this project
+GitHub Actions	CI	Runs the security pipeline on every push
+Gitleaks	Secrets	Detects credentials (AWS key pattern) in code and git history
+Semgrep	SAST	Flags SQL injection and unsafe Flask host binding
+Trivy	SCA / image	Finds HIGH/CRITICAL CVEs in Python dependencies and the image
+Hadolint	Container	Lints the Dockerfile (e.g. DL3002: last USER is root)
+Docker	Build	Packages the app as a container image
+Slack webhook	Alerting	Posts a message when any pipeline step fails
+Kind	Runtime	Local Kubernetes cluster running inside Docker
+Argo CD	GitOps	Syncs k8s/ from this repo into the cluster
+Kyverno	Policy	Blocks workloads that do not set runAsNonRoot: true
+Results
+1. Pipeline: fail → fix → pass
+Run	Commit	Result	What was caught / fixed
+#1	Vulnerable version	❌	Gitleaks found a hardcoded AWS access key in config.py
+#2–#7	Fixes pushed one at a time	❌	Key still present in git history; vulnerable dependency versions (Trivy)
+#8–#9	Patch deps, scope Semgrep	❌	Semgrep avoid_app_run_with_bad_host: Flask bound to 0.0.0.0
+#10	Bind host via env var	✅	All checks passed
 
 ## Results
 **Pipeline:** runs #1–#9 failed as the scanners caught issues. Run **#10 passed ✅** after all fixes.
