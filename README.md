@@ -1,40 +1,54 @@
-# DevSecOps CI/CD Demo
+# DevSecOps CI/CD Pipeline 
 
-Intentionally vulnerable Flask app used to demo a full DevSecOps pipeline:
-secrets scanning, SAST, dependency/image CVE scanning, Dockerfile linting,
-Slack alerts, GitOps deploy with ArgoCD, and admission-time policy blocking
-with Kyverno.
 
-**Do not deploy this app anywhere public. It is built to be caught by scanners.**
+Forked from [DrVCprog/devsecops-demo](https://github.com/DrVCprog/devsecops-demo).
 
-## What's intentionally broken (and why)
+A security pipeline built around an intentionally vulnerable Flask app. Issues are caught at **commit time** by GitHub Actions and at **deploy time** by Kubernetes.
 
-| File | Problem | Caught by |
+```
+git push → GitHub Actions: Gitleaks → Semgrep → Trivy → Hadolint → Docker build → Trivy image
+              │ any failure → Slack alert
+              ▼
+         Git (k8s/) → Argo CD → Kind cluster ← Kyverno blocks root containers
+```
+
+## Tools
+| Tool | Purpose |
+|---|---|
+| **Gitleaks** | Secrets in code and git history |
+| **Semgrep** | Static code analysis (SAST) |
+| **Trivy** | CVEs in dependencies and the container image |
+| **Hadolint** | Dockerfile linting |
+| **Slack** | Alert on pipeline failure |
+| **Argo CD** | GitOps sync from `k8s/` to the cluster |
+| **Kyverno** | Admission policy requiring `runAsNonRoot` |
+
+## Results
+**Pipeline:** runs #1–#9 failed as the scanners caught issues. Run **#10 passed ✅** after all fixes.
+
+| Caught by | Issue | Fix |
 |---|---|---|
-| `app.py` | SQL injection in `/user` | Semgrep |
-| `requirements.txt` | Flask 1.1.2, Werkzeug 1.0.1, Jinja2 2.11.3 (real CVEs) | Trivy (fs scan) |
-| `Dockerfile` | No `USER` — runs as root | Hadolint + image scan |
-| `k8s/deployment.yaml` | No `runAsNonRoot` | Kyverno (blocks at apply time) |
-| (added live) `config.py` | Hardcoded AWS key pattern | Gitleaks |
+| Gitleaks | Hardcoded AWS key | Removed; old finding in `.gitleaksignore` (key would be rotated) |
+| Semgrep | SQL injection | Parameterized query |
+| Semgrep | Flask bound to `0.0.0.0` | Host from `HOST` env var, default `127.0.0.1` |
+| Trivy | Vulnerable Flask/Werkzeug/Jinja2 | Upgraded to patched versions |
+| Hadolint | Container runs as root | Non-root `appuser` |
 
-Fixed versions are provided alongside each broken file so you can swap them in
-live: `requirements.fixed.txt`, `Dockerfile.fixed`, `k8s/deployment.fixed.yaml`.
+**Argo CD:** changing `replicas: 2 → 3` in Git auto-synced the cluster to 3 pods.
 
-## One-time setup (do this before the talk, not live)
+**Kyverno:**
+```
+$ kubectl apply -f k8s/deployment.yaml
+Error: admission webhook "validate.kyverno.svc-fail" denied the request:
+  Running as root is not allowed. Set spec.securityContext.runAsNonRoot: true.
 
-See `SETUP.md` for exact commands: repo + GitHub Actions secrets, local
-cluster, ArgoCD, Kyverno.
+$ kubectl apply -f deployment.fixed.yaml
+deployment.apps/demo-app created
+```
 
-## Suggested run order on stage
+## Changes from upstream
+- Semgrep runs via its Docker image (the old action is deprecated) and is scoped to `app.py`.
+- A non-`EXAMPLE` fake AWS key was used, since Gitleaks allowlists the original.
+- Vulnerable versions were reintroduced, since upstream files were already patched and didn't fail.
+- Added the missing `deployment.fixed.yaml` (at the repo root, so Argo CD doesn't sync it).
 
-1. Explain the pipeline file (`.github/workflows/devsecops.yml`) stage by stage.
-2. Push as-is → Trivy + Hadolint fail → Slack alert fires.
-3. Add the AWS-key snippet from `LIVE_DEMO_LEAK_SNIPPET.txt` → Gitleaks fails
-   → Slack alert fires again.
-4. Fix one thing at a time (swap in `requirements.fixed.txt`, `Dockerfile.fixed`,
-   remove the leaked key) → push → pipeline goes green.
-5. Show ArgoCD UI already synced from `k8s/` → change replica count in Git →
-   watch it auto-sync.
-6. `kubectl apply -f k8s/deployment.yaml` → Kyverno rejects it (no
-   `runAsNonRoot`) → then `kubectl apply -f k8s/deployment.fixed.yaml` →
-   succeeds.
