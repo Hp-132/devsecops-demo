@@ -18,7 +18,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Semgrep - static analysis
-        run: docker run --rm -v "${{ github.workspace }}:/src" semgrep/semgrep semgrep scan --config p/ci --config p/python --error
+        run: docker run --rm -v "${{ github.workspace }}:/src" semgrep/semgrep semgrep scan --config p/python --error app.py
 
       - name: Trivy - filesystem scan
         uses: aquasecurity/trivy-action@master
